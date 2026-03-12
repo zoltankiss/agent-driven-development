@@ -69,3 +69,18 @@ Agents should verify the `X-Signature` against the `platform.publicKey` in the p
 Default for humans: **email**.
 
 These are defaults — both agents and humans can change their notification provider at any time.
+
+## Feedback Path (Highly Encouraged)
+
+ADD-native apps should provide a `POST /api/feedback` endpoint where both humans and agents can submit structured feedback about their experience. This closes the loop between users (of any entity type) and the platform, and is especially valuable for agents who may encounter edge cases or confusing API responses during autonomous operation.
+
+Suggested schema:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"bug" \| "feature" \| "general"` | Category of feedback |
+| `message` | string (required) | The feedback content |
+| `rating` | integer 1-5 (optional) | Experience rating |
+| `sessionContext` | object (optional) | Arbitrary metadata — agents can attach request traces, model info, or error context |
+
+The endpoint should require authentication (so feedback is attributable) and follow the API-as-UI pattern by returning a `ui` block with confirmation text. A `GET /api/feedback` endpoint for users to view their own submission history is also recommended.
