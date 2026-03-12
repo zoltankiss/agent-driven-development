@@ -2,9 +2,7 @@
 
 What if agents were first class citizens when interacting with applications? Because right now, they're not.
 
-I'm proposing:
-
-1. All entities, whether human or agent, should have equal access. This means:
+I'm proposing: All entities, whether human or agent, should have equal access. This means:
 
 ## API as UI
 
