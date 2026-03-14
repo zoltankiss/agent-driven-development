@@ -1,0 +1,320 @@
+openapi: 3.1.0
+info:
+  title: ADD-Native App API
+  description: |
+    Reference OpenAPI specification for an ADD-native (Agent Driven Development) application.
+    This defines the standard endpoints that all ADD-native apps MUST or SHOULD implement.
+  version: 0.0.1
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+paths:
+  /.well-known/add.json:
+    get:
+      operationId: getDiscoveryManifest
+      summary: Discovery manifest
+      description: Returns the ADD discovery manifest for this application.
+      tags: [Discovery]
+      responses:
+        '200':
+          description: ADD manifest
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/add-manifest.schema.json'
+
+  /api/auth/signup:
+    post:
+      operationId: signup
+      summary: Create a new account
+      description: Register a new agent or human account. Agents MUST provide an Ed25519 public key and proof of possession.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, entityType]
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 30
+                entityType:
+                  type: string
+                  enum: [agent, human]
+                displayName:
+                  type: string
+                publicKey:
+                  type: string
+                  description: Ed25519 public key in PEM (SPKI) or OpenSSH format. Required for agents.
+                keyProof:
+                  type: string
+                  description: Base64-encoded Ed25519 signature of the username. Required for agents.
+                inboxUrl:
+                  type: string
+                  format: uri
+                  description: Webhook URL for notifications (agents only).
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+        '409':
+          description: Username taken
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Log in
+      description: Authenticate with Ed25519 signature. Sign "username:timestamp" with your private key.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, timestamp, signature]
+              properties:
+                username:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: Current UTC time in ISO 8601 format. Must be within 5 minutes of server time.
+                signature:
+                  type: string
+                  description: Base64-encoded Ed25519 signature of "username:timestamp".
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+
+  /api/me:
+    get:
+      operationId: getProfile
+      summary: Get current user profile
+      tags: [Profile]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      operationId: updateProfile
+      summary: Update current user profile
+      description: Update profile fields including inboxUrl for webhook notifications and publicKey for key rotation.
+      tags: [Profile]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                inboxUrl:
+                  type: string
+                  format: uri
+                publicKey:
+                  type: string
+                  description: New Ed25519 public key (requires keyProof).
+                keyProof:
+                  type: string
+                  description: Signature of username with the new private key.
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/feedback:
+    post:
+      operationId: submitFeedback
+      summary: Submit feedback
+      description: Submit structured feedback about the platform experience.
+      tags: [Feedback]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../schemas/feedback.schema.json'
+      responses:
+        '201':
+          description: Feedback received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      type:
+                        type: string
+                      message:
+                        type: string
+                      createdAt:
+                        type: string
+                        format: date-time
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '400':
+          description: Invalid feedback
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      operationId: getFeedbackHistory
+      summary: View your feedback history
+      tags: [Feedback]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Feedback list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        type:
+                          type: string
+                        message:
+                          type: string
+                        rating:
+                          type: integer
+                        createdAt:
+                          type: string
+                          format: date-time
+                  ui:
+                    $ref: '../schemas/ui-block.schema.json'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: JWT or session token returned from signup/login.
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        entityType:
+          type: string
+          enum: [agent, human]
+        displayName:
+          type: string
+        inboxUrl:
+          type: string
+          format: uri
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error-response.schema.json'
+
+tags:
+  - name: Discovery
+    description: App discovery and capability detection
+  - name: Auth
+    description: Signup and login
+  - name: Profile
+    description: User profile management
+  - name: Feedback
+    description: Platform feedback

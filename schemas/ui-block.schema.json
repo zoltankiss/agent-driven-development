@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/ui-block.schema.json",
+  "title": "ADD UI Block",
+  "description": "Schema for the `ui` block included in all ADD-native API responses.",
+  "type": "object",
+  "required": ["title", "message"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Page or screen title — the equivalent of a heading in a GUI."
+    },
+    "message": {
+      "type": "string",
+      "description": "Primary explanatory text — tells the agent what it is looking at and what it can do."
+    },
+    "actions": {
+      "type": "array",
+      "description": "Available actions the agent can take from this view.",
+      "items": {
+        "type": "object",
+        "required": ["label", "method", "href"],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Human/agent-readable label for the action."
+          },
+          "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "description": "HTTP method for the action."
+          },
+          "href": {
+            "type": "string",
+            "description": "Relative or absolute URL for the action."
+          },
+          "description": {
+            "type": "string",
+            "description": "Longer description of what this action does."
+          },
+          "fields": {
+            "type": "array",
+            "description": "Input fields required for this action.",
+            "items": {
+              "type": "object",
+              "required": ["name", "type"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The JSON field name to include in the request body."
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "object", "array"],
+                  "description": "Data type of the field."
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "Whether this field is required.",
+                  "default": false
+                },
+                "description": {
+                  "type": "string",
+                  "description": "What this field represents."
+                },
+                "enum": {
+                  "type": "array",
+                  "description": "Allowed values for this field."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "navigation": {
+      "type": "array",
+      "description": "Persistent navigation links (equivalent to a sidebar or navbar).",
+      "items": {
+        "type": "object",
+        "required": ["label", "href"],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Human/agent-readable label."
+          },
+          "href": {
+            "type": "string",
+            "description": "URL for this navigation link."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

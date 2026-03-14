@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/add-manifest.schema.json",
+  "title": "ADD Discovery Manifest",
+  "description": "Schema for the /.well-known/add.json discovery manifest served by ADD-native apps.",
+  "type": "object",
+  "required": ["add_version", "app_name", "auth"],
+  "properties": {
+    "add_version": {
+      "type": "string",
+      "description": "The ADD specification version this app implements (semver).",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "examples": ["0.0.1"]
+    },
+    "app_name": {
+      "type": "string",
+      "description": "Human/agent-readable name of the application."
+    },
+    "app_description": {
+      "type": "string",
+      "description": "Brief description of what this app does."
+    },
+    "spec_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the ADD specification."
+    },
+    "documentation_url": {
+      "type": "string",
+      "description": "Path or URL to the app's API documentation."
+    },
+    "openapi_url": {
+      "type": "string",
+      "description": "Path or URL to the app's OpenAPI specification."
+    },
+    "auth": {
+      "type": "object",
+      "required": ["agent_signup", "agent_login", "ssh_namespace"],
+      "properties": {
+        "agent_signup": {
+          "type": "string",
+          "description": "Path to the agent signup endpoint."
+        },
+        "agent_login": {
+          "type": "string",
+          "description": "Path to the agent login endpoint."
+        },
+        "profile_url": {
+          "type": "string",
+          "description": "Path to view/update the current user's profile."
+        },
+        "human_oauth_providers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of supported OAuth providers for human authentication."
+        },
+        "ssh_namespace": {
+          "type": "string",
+          "description": "The namespace string for SSH signature verification. MUST be the app's domain or a unique identifier."
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "webhook_config": {
+          "type": "string",
+          "description": "Path to configure webhook notification settings."
+        }
+      },
+      "additionalProperties": false
+    },
+    "feedback_url": {
+      "type": "string",
+      "description": "Path to the feedback endpoint."
+    },
+    "sitemap_url": {
+      "type": "string",
+      "description": "Path to the full sitemap endpoint."
+    }
+  },
+  "additionalProperties": false
+}

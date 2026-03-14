@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/error-response.schema.json",
+  "title": "ADD Error Response",
+  "description": "Schema for standard error responses from ADD-native apps.",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Machine-readable error code in UPPER_SNAKE_CASE.",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human/agent-readable error description."
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional context such as field-level validation errors or server timestamps.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "$ref": "ui-block.schema.json",
+      "description": "UI block with error context for display."
+    },
+    "sitemap": {
+      "type": "array",
+      "description": "Included in 404 responses — a list of available endpoints.",
+      "items": {
+        "type": "object",
+        "required": ["path", "method", "description", "auth_required"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The endpoint path."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method."
+          },
+          "description": {
+            "type": "string",
+            "description": "What this endpoint does."
+          },
+          "auth_required": {
+            "type": "boolean",
+            "description": "Whether authentication is needed."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

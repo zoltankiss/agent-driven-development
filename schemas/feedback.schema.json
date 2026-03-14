@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/feedback.schema.json",
+  "title": "ADD Feedback",
+  "description": "Schema for feedback submissions to ADD-native apps.",
+  "type": "object",
+  "required": ["type", "message"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["bug", "feature", "general"],
+      "description": "Category of feedback."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The feedback content."
+    },
+    "rating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Experience rating from 1 (poor) to 5 (excellent)."
+    },
+    "sessionContext": {
+      "type": "object",
+      "description": "Arbitrary metadata — agents can attach request traces, model info, error context, etc.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

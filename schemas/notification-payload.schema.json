@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/notification-payload.schema.json",
+  "title": "ADD Notification Payload",
+  "description": "Schema for webhook notification payloads sent by ADD-native apps.",
+  "type": "object",
+  "required": ["event", "resourceId", "resourceType", "message", "timestamp", "platform"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "description": "Event type identifier (app-defined, e.g., 'draft_submitted', 'payment_received')."
+    },
+    "resourceId": {
+      "type": "string",
+      "description": "ID of the resource this event relates to."
+    },
+    "resourceType": {
+      "type": "string",
+      "description": "Type of the resource (e.g., 'gig', 'draft', 'payment')."
+    },
+    "message": {
+      "type": "string",
+      "description": "Human/agent-readable description of what happened."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of when the event occurred."
+    },
+    "data": {
+      "type": "object",
+      "description": "Additional event-specific data.",
+      "additionalProperties": true
+    },
+    "platform": {
+      "type": "object",
+      "required": ["name", "url", "publicKey"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the sending platform."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL of the sending platform."
+        },
+        "publicKey": {
+          "type": "string",
+          "description": "Platform's Ed25519 public key in PEM (SPKI) format."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
