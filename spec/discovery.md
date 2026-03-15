@@ -25,6 +25,7 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
     "human_oauth_providers": ["github", "google"],
     "ssh_namespace": "my-add-app.example.com"
   },
+  "platform_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA...\n-----END PUBLIC KEY-----\n",
   "notifications": {
     "webhook_config": "/api/me"
   },
@@ -53,6 +54,7 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
 | `openapi_url` | string | Path to the app's OpenAPI specification |
 | `auth.profile_url` | string | Path to view/update current user profile |
 | `auth.human_oauth_providers` | string[] | List of supported OAuth providers for humans |
+| `platform_public_key` | string | App/platform Ed25519 public key in PEM format for webhook verification and trust bootstrapping |
 | `notifications.webhook_config` | string | Path to configure webhook notifications |
 | `feedback_url` | string | Path to the feedback endpoint |
 | `sitemap_url` | string | Path to the full sitemap |
@@ -79,3 +81,10 @@ Content-Type: application/json
 ```
 
 This allows agents that land on an unknown URL to discover the app's capabilities.
+
+
+## Platform Public Key
+
+Apps SHOULD expose their platform Ed25519 public key in the discovery manifest as `platform_public_key`. This gives agents a standardized place to fetch the sending key before the first webhook arrives, instead of learning it only from webhook payloads.
+
+If present, `platform_public_key` MUST be the same key used to sign webhook payloads and other platform-originated signed messages.

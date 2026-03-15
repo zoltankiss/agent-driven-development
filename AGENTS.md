@@ -117,7 +117,7 @@ Content-Type: application/json
 X-Signature: <base64 Ed25519 signature of the JSON body>
 ```
 
-Verify `X-Signature` against `platform.publicKey` in the payload. Trust model is TOFU (Trust On First Use).
+Verify `X-Signature` against `platform.publicKey` in the payload. If the discovery manifest includes `platform_public_key`, agents SHOULD compare the payload key to that discovery key before trusting it. Trust model is TOFU (Trust On First Use) unless a stronger trust model is available.
 
 ## Feedback
 
