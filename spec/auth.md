@@ -2,7 +2,7 @@
 
 **Status:** Required | **Version:** 0.0.1
 
-ADD-native apps MUST support Ed25519 keypair authentication for agents. Human authentication (OAuth, password, etc.) is orthogonal and left to the implementer.
+ADD-native apps MUST support Ed25519 keypair authentication for agents. For human authentication, apps SHOULD support WebAuthn/passkeys as the RECOMMENDED mechanism. Other methods (OAuth, passwords) MAY be offered as fallbacks.
 
 ## Key Words
 
@@ -155,12 +155,58 @@ The token returned from signup/login MUST be included in subsequent requests:
 Authorization: Bearer <token>
 ```
 
-## Human Authentication
+## Human Authentication (Unified Public-Key Model)
 
-Humans MAY authenticate via OAuth or any other mechanism the app supports. ADD does not prescribe human auth flows. However:
+ADD recognizes a fundamental symmetry between agent and human authentication: both can use public-key cryptography where the server never stores secrets.
 
-- If an entity selects `entityType: "human"` during signup, the app SHOULD require a CAPTCHA or equivalent challenge
+| Entity | Mechanism | Key type | Flow |
+|--------|-----------|----------|------|
+| Agent | Ed25519 | Software keypair | Sign challenge with private key |
+| Human | WebAuthn/Passkey | Hardware/platform authenticator | Sign challenge with authenticator |
+
+### WebAuthn/Passkeys (RECOMMENDED)
+
+Apps SHOULD support WebAuthn/passkeys for human authentication. This gives humans the same security model as agents — register a public key, prove private key ownership by signing a challenge — while leveraging platform authenticators (Face ID, Windows Hello, security keys).
+
+#### Manifest Fields
+
+Apps that support passkey auth SHOULD include these fields in the discovery manifest:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `auth.human_passkey_register` | string | Path to the passkey registration options endpoint |
+| `auth.human_passkey_login` | string | Path to the passkey authentication options endpoint |
+
+#### Registration Flow
+
+1. Client sends `POST {manifest.auth.human_passkey_register}` with `{ "username": "..." }` (new signup) or an `Authorization` header (adding passkey to existing account)
+2. Server returns `PublicKeyCredentialCreationOptionsJSON` per the [WebAuthn spec](https://www.w3.org/TR/webauthn-3/)
+3. Client calls `navigator.credentials.create()` with the options
+4. Client sends the attestation response back to the server for verification
+5. Server stores the credential and returns a session token
+
+#### Authentication Flow
+
+1. Client sends `POST {manifest.auth.human_passkey_login}` (no username needed for discoverable credentials)
+2. Server returns `PublicKeyCredentialRequestOptionsJSON`
+3. Client calls `navigator.credentials.get()` with the options
+4. Client sends the assertion response back to the server for verification
+5. Server verifies against stored credentials and returns a session token
+
+#### Server Requirements
+
+- The server MUST store a challenge with a short TTL (RECOMMENDED: 5 minutes) and verify it is consumed exactly once
+- The server MUST store the credential public key, counter, and transport hints
+- The server MUST verify the authenticator counter on each login to detect cloned authenticators
+- The server SHOULD allow users to register multiple passkeys
+
+### Fallback Methods
+
+Apps MAY also support passwords, OAuth, or other human auth mechanisms as fallbacks. ADD does not prescribe these flows, but:
+
+- If an entity selects `entityType: "human"` during signup, the app SHOULD require a CAPTCHA or equivalent challenge (for password-based signup)
 - Humans MAY add an Ed25519 keypair later via `PATCH {manifest.auth.profile_url}`
+- The `entityType` field is metadata about the account, not a selector for authentication method — a human with a passkey and an agent with Ed25519 use conceptually identical flows
 
 ## Key Rotation
 
