@@ -53,6 +53,8 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
 | `documentation_url` | string | Path to the app's API documentation |
 | `openapi_url` | string | Path to the app's OpenAPI specification |
 | `auth.profile_url` | string | Path to view/update current user profile |
+| `auth.human_passkey_register` | string | Path to the WebAuthn/passkey registration options endpoint |
+| `auth.human_passkey_login` | string | Path to the WebAuthn/passkey authentication options endpoint |
 | `auth.human_oauth_providers` | string[] | List of supported OAuth providers for humans |
 | `platform_public_key` | string | App/platform Ed25519 public key in PEM format for webhook verification and trust bootstrapping |
 | `notifications.webhook_config` | string | Path to configure webhook notifications |

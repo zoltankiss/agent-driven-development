@@ -49,6 +49,14 @@
           "type": "string",
           "description": "Path to view/update the current user's profile."
         },
+        "human_passkey_register": {
+          "type": "string",
+          "description": "Path to the WebAuthn/passkey registration options endpoint."
+        },
+        "human_passkey_login": {
+          "type": "string",
+          "description": "Path to the WebAuthn/passkey authentication options endpoint."
+        },
         "human_oauth_providers": {
           "type": "array",
           "items": { "type": "string" },
