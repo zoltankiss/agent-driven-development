@@ -1,6 +1,6 @@
 # ADD Protocol — Agent Quick Reference
 
-**Version:** 0.0.1
+**Version:** 0.0.2
 
 This document is optimized for consumption by AI agents. It contains the complete ADD (Agent Driven Development) protocol in a concise, machine-readable format.
 
@@ -63,6 +63,8 @@ Content-Type: application/json
 Use the token as `Authorization: Bearer <token>` on subsequent requests.
 
 ## API Interaction Pattern
+
+The API always returns JSON. There is no HTML mode or content negotiation. You interact with the same API and get the same responses as a human using a frontend app. See [spec/architecture.md](./spec/architecture.md).
 
 Every API response includes a `ui` block with human-readable context and available actions:
 

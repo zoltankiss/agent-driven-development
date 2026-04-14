@@ -1,6 +1,6 @@
 # API as UI
 
-**Status:** Required | **Version:** 0.0.1
+**Status:** Required | **Version:** 0.0.2
 
 ADD-native apps MUST include structured UI context in API responses so that agents receive the same information humans see in a graphical interface.
 
@@ -87,16 +87,11 @@ See [`../schemas/ui-block.schema.json`](../schemas/ui-block.schema.json) for the
 
 The `ui` block is inspired by hypermedia patterns (HATEOAS, HAL, Siren) but simplified for agent consumption. The key principle: **agents SHOULD follow `actions` and `navigation` links rather than hardcoding URLs.** The only URL an agent needs to know in advance is `/.well-known/add.json`.
 
-## Content Negotiation
+## Response Format
 
-ADD-native apps SHOULD support content negotiation via the `Accept` header:
+ADD-native APIs MUST return `application/json` for all endpoints. Content negotiation (serving HTML based on `Accept: text/html`) is NOT RECOMMENDED. Human-facing interfaces SHOULD be implemented as separate frontend applications that consume the JSON API.
 
-| Accept Header | Response |
-|---------------|----------|
-| `application/json` (default) | JSON with `ui` block — the primary ADD format |
-| `text/html` | Rendered HTML page for human browsers |
-
-If no `Accept` header is provided, apps SHOULD default to `application/json`.
+See [Architecture](./architecture.md) for the recommended separation between API and frontend.
 
 ## 404 as Sitemap
 
