@@ -4,6 +4,16 @@ All notable changes to the ADD specification will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.2] - 2026-04-13
+
+### Changed
+- **Architecture: Pure API + Separate Frontend.** The spec now recommends that APIs return JSON exclusively. Human-facing interfaces should be separate frontend applications that consume the same API as agents. Content negotiation (`Accept: text/html`) is no longer recommended.
+- The `ui` block is now positioned as a rendering contract between the API and any client (agent or frontend), not just metadata for agents.
+- Updated `spec/api-as-ui.md`: Replaced "Content Negotiation" section with "Response Format" section recommending JSON-only responses.
+
+### Added
+- New specification document: `spec/architecture.md` — covers the Pure API + Separate Frontend pattern, the `ui` block as rendering contract, CORS guidance, and the "frontend is just another client" principle.
+
 ## [0.0.1] - 2026-03-14
 
 ### Added

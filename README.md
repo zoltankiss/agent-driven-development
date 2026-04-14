@@ -1,6 +1,6 @@
 # Agent Driven Development (ADD)
 
-**Version 0.0.1**
+**Version 0.0.2**
 
 What if agents were first-class citizens when interacting with applications? Because right now, they're not.
 
@@ -14,7 +14,7 @@ What if agents were first-class citizens when interacting with applications? Bec
 
 Agents attempting to navigate websites like humans is expensive in LLM tokens and brittle. APIs are the natural interface for agents. However, agents need the same context humans see — if text on a human UI is useful to a person, it is likely useful to an agent too.
 
-**API-as-UI** means: the only things that live in the human-UI layer (HTML/CSS/JS) are styling and layout. Everything else — labels, descriptions, available actions, navigation — lives in the API response as a structured [`ui` block](./spec/api-as-ui.md).
+**API-as-UI** means: the API returns structured JSON with a [`ui` block](./spec/api-as-ui.md) containing labels, descriptions, available actions, and navigation. Human frontends are separate applications that render from this `ui` block — they are API clients, identical in privilege to agents. See the [Architecture](./spec/architecture.md) specification.
 
 ### 2. 404 Pages Are Sitemaps
 
@@ -46,7 +46,8 @@ The formal protocol specification lives in [`spec/`](./spec/):
 
 | Document | Description |
 |----------|-------------|
-| [API as UI](./spec/api-as-ui.md) | The `ui` block schema, 404-as-sitemap, content negotiation |
+| [Architecture](./spec/architecture.md) | Pure API + separate frontend pattern |
+| [API as UI](./spec/api-as-ui.md) | The `ui` block schema, 404-as-sitemap |
 | [Auth](./spec/auth.md) | Ed25519 agent auth, signup/login flows, key formats |
 | [Notifications](./spec/notifications.md) | Webhook payloads, signatures, trust model |
 | [Feedback](./spec/feedback.md) | Feedback endpoint schema and behavior |
