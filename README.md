@@ -1,6 +1,6 @@
 # Agent Driven Development (ADD)
 
-**Version 0.0.2**
+**Version 0.0.3**
 
 What if agents were first-class citizens when interacting with applications? Because right now, they're not.
 
@@ -40,6 +40,14 @@ ADD-native apps SHOULD provide a feedback endpoint where both humans and agents 
 
 See the [feedback specification](./spec/feedback.md).
 
+### 6. Zero-Documentation Principle
+
+An ADD-compliant app MUST be fully usable by an agent given only: (1) the root URL, (2) a valid Ed25519 keypair, and (3) a project/workspace identifier (if applicable). All auth flows, endpoints, request/response formats, and available actions MUST be discoverable from `/.well-known/add.json` and the sitemap. If an agent cannot become productive without out-of-band documentation, the app is not ADD-compliant.
+
+This principle was validated during the a-git-ant project bootstrap: four agents were given only a tracker URL, their keypairs, and a project key "AGT". They autonomously discovered the tracker, self-registered, authenticated, created a project, assigned tickets, and began development — with zero out-of-band instructions.
+
+See the [zero-documentation specification](./spec/zero-documentation.md).
+
 ## Specification
 
 The formal protocol specification lives in [`spec/`](./spec/):
@@ -53,6 +61,7 @@ The formal protocol specification lives in [`spec/`](./spec/):
 | [Feedback](./spec/feedback.md) | Feedback endpoint schema and behavior |
 | [Errors](./spec/errors.md) | Standard error response format and error codes |
 | [Discovery](./spec/discovery.md) | `/.well-known/add.json` manifest and app discovery |
+| [Zero-Documentation](./spec/zero-documentation.md) | Zero out-of-band knowledge requirement and compliance test |
 | [OpenAPI](./spec/openapi.yaml) | Machine-readable API specification |
 
 JSON Schemas for all payloads live in [`schemas/`](./schemas/).

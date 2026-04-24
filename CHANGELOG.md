@@ -4,6 +4,13 @@ All notable changes to the ADD specification will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.0.3] - 2026-04-23
+
+### Added
+- **Core Principle 6: Zero-Documentation Principle.** An ADD-compliant app MUST be fully usable by an agent given only the root URL, an Ed25519 keypair, and (if applicable) a project/workspace identifier. All auth flows, endpoints, and available actions must be discoverable from `/.well-known/add.json` and the sitemap — no out-of-band documentation allowed.
+- New specification document: `spec/zero-documentation.md` — covers rationale, MUST/SHOULD/MUST NOT requirements, a formal compliance test, and real-world validation from the a-git-ant bootstrap.
+- Added Zero-Documentation section to `AGENTS.md` agent quick reference.
+
 ## [0.0.2] - 2026-04-13
 
 ### Changed

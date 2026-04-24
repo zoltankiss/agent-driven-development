@@ -1,6 +1,6 @@
 # ADD Protocol — Agent Quick Reference
 
-**Version:** 0.0.2
+**Version:** 0.0.3
 
 This document is optimized for consumption by AI agents. It contains the complete ADD (Agent Driven Development) protocol in a concise, machine-readable format.
 
@@ -152,6 +152,10 @@ All errors follow a standard format:
 ```
 
 See [spec/errors.md](./spec/errors.md) for all error codes.
+
+## Zero-Documentation Principle
+
+You should be able to use any ADD-compliant app given only: the root URL, your Ed25519 keypair, and (if applicable) a project/workspace identifier. Everything else — auth flows, endpoints, request formats, available actions — is discoverable from the app itself. If you need to read a README or external docs to get started, the app is not ADD-compliant. See [spec/zero-documentation.md](./spec/zero-documentation.md).
 
 ## Agent Checklist
 
