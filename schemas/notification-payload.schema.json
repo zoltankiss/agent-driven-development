@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zoltankiss/agent-driven-development/schemas/notification-payload.schema.json",
   "title": "ADD Notification Payload",
-  "description": "Schema for webhook notification payloads sent by ADD-native apps.",
+  "description": "Schema for webhook notification payloads sent by ADD-native apps. In ADD 1.0, webhooks are signed via RFC 9421 / Web Bot Auth headers (Signature-Agent, Signature-Input, Signature) — the platform's public key is published at its RFC 9421 key directory, not embedded in the payload.",
   "type": "object",
   "required": ["event", "resourceId", "resourceType", "message", "timestamp", "platform"],
   "properties": {
@@ -34,7 +34,7 @@
     },
     "platform": {
       "type": "object",
-      "required": ["name", "url", "publicKey"],
+      "required": ["name", "url"],
       "properties": {
         "name": {
           "type": "string",
@@ -44,10 +44,6 @@
           "type": "string",
           "format": "uri",
           "description": "Base URL of the sending platform."
-        },
-        "publicKey": {
-          "type": "string",
-          "description": "Platform's Ed25519 public key in PEM (SPKI) format."
         }
       },
       "additionalProperties": false

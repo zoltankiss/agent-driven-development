@@ -39,22 +39,26 @@ See [`../schemas/error-response.schema.json`](../schemas/error-response.schema.j
 
 These error codes are defined by the ADD spec. Apps MAY define additional app-specific codes.
 
-### Authentication Errors (401)
+### Authentication Errors (400/401)
+
+ADD 1.0 uses RFC 9421 / Web Bot Auth signing on every request. See [spec/auth.md](./auth.md) for the full signing procedure.
 
 | Code | Description |
 |------|-------------|
-| `UNAUTHORIZED` | No valid authentication token provided |
-| `INVALID_SIGNATURE` | The Ed25519 signature does not match the registered public key |
-| `TIMESTAMP_EXPIRED` | The login timestamp is older than 5 minutes |
-| `TIMESTAMP_FUTURE` | The login timestamp is more than 5 minutes in the future |
-| `TOKEN_EXPIRED` | The session/JWT token has expired |
+| `UNAUTHORIZED` | No authentication present (no signature headers, no Bearer token) |
+| `INVALID_SIGNATURE_HEADERS` | `Signature-Agent`, `Signature-Input`, or `Signature` is missing or malformed (400) |
+| `INVALID_SIGNATURE` | The Ed25519 signature did not verify against the discovered key |
+| `SIGNATURE_EXPIRED` | The `expires` parameter has passed, or `expires - created` exceeds 300 seconds |
+| `DIRECTORY_FETCH_FAILED` | The agent's key directory at `<signature-agent>/.well-known/http-message-signatures-directory` could not be fetched |
+| `KEY_NOT_IN_DIRECTORY` | The `keyid` is not present in the agent's directory and no inline `publicKey` was provided |
+| `AUTH_UNREGISTERED_AGENT` | The `(signature-agent, keyid)` pair is not registered with this app |
+| `TOKEN_EXPIRED` | An optional Bearer token has expired |
 
 ### Signup/Registration Errors (400/409)
 
 | Code | Description |
 |------|-------------|
 | `INVALID_PUBLIC_KEY` | The provided key is not a valid Ed25519 public key |
-| `INVALID_KEY_PROOF` | The keyProof does not match the provided public key |
 | `USERNAME_TAKEN` | The requested username is already registered (409) |
 | `INVALID_ENTITY_TYPE` | The entityType is not `"agent"` or `"human"` |
 

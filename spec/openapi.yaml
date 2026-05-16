@@ -4,7 +4,11 @@ info:
   description: |
     Reference OpenAPI specification for an ADD-native (Agent Driven Development) application.
     This defines the standard endpoints that all ADD-native apps MUST or SHOULD implement.
-  version: 0.0.1
+
+    Authentication is HTTP Message Signatures (RFC 9421) under the Web Bot Auth profile.
+    Every authenticated request includes `Signature-Agent`, `Signature-Input`, and `Signature` headers.
+    See spec/auth.md for the full signing procedure.
+  version: 1.0.0
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -24,12 +28,48 @@ paths:
               schema:
                 $ref: '../schemas/add-manifest.schema.json'
 
+  /.well-known/http-message-signatures-directory:
+    get:
+      operationId: getKeyDirectory
+      summary: Platform key directory
+      description: |
+        JWK Set containing the platform's Ed25519 public keys. Agents fetch this to
+        verify platform-signed webhooks. Agents publish an equivalent endpoint on
+        their own FQDN to expose their public keys for server verification.
+      tags: [Discovery]
+      responses:
+        '200':
+          description: JWK Set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      required: [kty, crv, x, kid]
+                      properties:
+                        kty: { const: OKP }
+                        crv: { const: Ed25519 }
+                        x:   { type: string, description: base64url public key }
+                        kid: { type: string, description: JWK Thumbprint (RFC 7638) }
+
   /api/auth/signup:
     post:
       operationId: signup
-      summary: Create a new account
-      description: Register a new agent or human account. Agents MUST provide an Ed25519 public key and proof of possession.
+      summary: Create a new agent account
+      description: |
+        Register a new agent account. The request MUST be signed per RFC 9421 / Web Bot Auth.
+        The request signature is the proof-of-possession; there is no separate keyProof field.
+
+        If the agent cannot host a key directory at its own FQDN, it MAY include `publicKey`
+        (JWK) in the body; the server registers that key directly and skips the directory fetch.
       tags: [Auth]
+      security:
+        - webBotAuth: []
       requestBody:
         required: true
         content:
@@ -47,16 +87,22 @@ paths:
                   enum: [agent, human]
                 displayName:
                   type: string
-                publicKey:
-                  type: string
-                  description: Ed25519 public key in PEM (SPKI) or OpenSSH format. Required for agents.
-                keyProof:
-                  type: string
-                  description: Base64-encoded Ed25519 signature of the username. Required for agents.
                 inboxUrl:
                   type: string
                   format: uri
                   description: Webhook URL for notifications (agents only).
+                publicKey:
+                  type: object
+                  description: |
+                    Optional JWK for agents that cannot host a key directory. If omitted,
+                    the server fetches the agent's directory at
+                    `<Signature-Agent>/.well-known/http-message-signatures-directory`.
+                  required: [kty, crv, x]
+                  properties:
+                    kty: { const: OKP }
+                    crv: { const: Ed25519 }
+                    x:   { type: string }
+                    kid: { type: string }
       responses:
         '201':
           description: Account created
@@ -65,14 +111,21 @@ paths:
               schema:
                 type: object
                 properties:
-                  user:
-                    $ref: '#/components/schemas/User'
-                  token:
-                    type: string
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
                   ui:
                     $ref: '../schemas/ui-block.schema.json'
         '400':
-          description: Invalid request
+          description: Invalid request (missing or malformed signature headers)
+          content:
+            application/json:
+              schema:
+                $ref: '../schemas/error-response.schema.json'
+        '401':
+          description: Signature verification failed
           content:
             application/json:
               schema:
@@ -84,55 +137,35 @@ paths:
               schema:
                 $ref: '../schemas/error-response.schema.json'
 
-  /api/auth/login:
+  /api/auth/session:
     post:
-      operationId: login
-      summary: Log in
-      description: Authenticate with Ed25519 signature. Sign "username:timestamp" with your private key.
+      operationId: createSession
+      summary: Mint an opportunistic Bearer token (optional)
+      description: |
+        Optional. Servers MAY support this endpoint for high-frequency clients that
+        prefer Bearer tokens over per-request signing. Send a signed (Web Bot Auth)
+        empty POST; the server returns a short-lived (TTL <= 1h) token bound to the
+        `(signature-agent, keyid)` pair. Per-request signing remains canonical.
       tags: [Auth]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, timestamp, signature]
-              properties:
-                username:
-                  type: string
-                timestamp:
-                  type: string
-                  format: date-time
-                  description: Current UTC time in ISO 8601 format. Must be within 5 minutes of server time.
-                signature:
-                  type: string
-                  description: Base64-encoded Ed25519 signature of "username:timestamp".
+      security:
+        - webBotAuth: []
       responses:
         '200':
-          description: Login successful
+          description: Token issued
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  token:
-                    type: string
-                  user:
-                    $ref: '#/components/schemas/User'
+                  data:
+                    type: object
+                    properties:
+                      token:    { type: string }
+                      expires:  { type: integer, description: Unix timestamp }
                   ui:
                     $ref: '../schemas/ui-block.schema.json'
         '401':
-          description: Authentication failed
-          content:
-            application/json:
-              schema:
-                $ref: '../schemas/error-response.schema.json'
-        '404':
-          description: User not found
-          content:
-            application/json:
-              schema:
-                $ref: '../schemas/error-response.schema.json'
+          $ref: '#/components/responses/Unauthorized'
 
   /api/me:
     get:
@@ -140,6 +173,7 @@ paths:
       summary: Get current user profile
       tags: [Profile]
       security:
+        - webBotAuth: []
         - bearerAuth: []
       responses:
         '200':
@@ -158,9 +192,14 @@ paths:
     patch:
       operationId: updateProfile
       summary: Update current user profile
-      description: Update profile fields including inboxUrl for webhook notifications and publicKey for key rotation.
+      description: |
+        Update profile fields including inboxUrl. To rotate keys, update your JWK
+        directory (the server picks up new keys automatically). Agents that registered
+        an explicit `publicKey` at signup rotate by PATCHing a new `publicKey` here;
+        the PATCH MUST be signed with the **new** key.
       tags: [Profile]
       security:
+        - webBotAuth: []
         - bearerAuth: []
       requestBody:
         required: true
@@ -175,11 +214,14 @@ paths:
                   type: string
                   format: uri
                 publicKey:
-                  type: string
-                  description: New Ed25519 public key (requires keyProof).
-                keyProof:
-                  type: string
-                  description: Signature of username with the new private key.
+                  type: object
+                  description: New Ed25519 JWK for agents that registered an explicit key at signup.
+                  required: [kty, crv, x]
+                  properties:
+                    kty: { const: OKP }
+                    crv: { const: Ed25519 }
+                    x:   { type: string }
+                    kid: { type: string }
       responses:
         '200':
           description: Profile updated
@@ -202,6 +244,7 @@ paths:
       description: Submit structured feedback about the platform experience.
       tags: [Feedback]
       security:
+        - webBotAuth: []
         - bearerAuth: []
       requestBody:
         required: true
@@ -245,6 +288,7 @@ paths:
       summary: View your feedback history
       tags: [Feedback]
       security:
+        - webBotAuth: []
         - bearerAuth: []
       responses:
         '200':
@@ -278,10 +322,21 @@ paths:
 
 components:
   securitySchemes:
+    webBotAuth:
+      type: apiKey
+      in: header
+      name: Signature
+      description: |
+        HTTP Message Signatures (RFC 9421) under the Web Bot Auth profile.
+        Three headers are required on every authenticated request:
+        `Signature-Agent`, `Signature-Input`, and `Signature`. Algorithm:
+        Ed25519. Tag: `web-bot-auth`. See spec/auth.md.
     bearerAuth:
       type: http
       scheme: bearer
-      description: JWT or session token returned from signup/login.
+      description: |
+        Optional. Short-lived Bearer token minted from a signed request to
+        `auth.session_url`. Per-request signing remains the canonical mechanism.
 
   schemas:
     User:
@@ -300,10 +355,17 @@ components:
         inboxUrl:
           type: string
           format: uri
+        signatureAgent:
+          type: string
+          format: uri
+          description: Agent's Signature-Agent FQDN.
+        keyid:
+          type: string
+          description: JWK Thumbprint of the agent's registered Ed25519 key.
 
   responses:
     Unauthorized:
-      description: Authentication required
+      description: Authentication required or signature verification failed
       content:
         application/json:
           schema:
@@ -311,9 +373,9 @@ components:
 
 tags:
   - name: Discovery
-    description: App discovery and capability detection
+    description: App discovery, manifest, and key directory
   - name: Auth
-    description: Signup and login
+    description: Signup and (optional) session token issuance
   - name: Profile
     description: User profile management
   - name: Feedback

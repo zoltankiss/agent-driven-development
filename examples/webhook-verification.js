@@ -1,120 +1,166 @@
 /**
- * Webhook Verification Example
+ * Webhook Verification Example (ADD 1.0 / Web Bot Auth)
  *
- * Demonstrates how an agent should verify incoming webhook notifications
- * from an ADD-native platform using Ed25519 signature verification.
+ * Demonstrates how an agent verifies an incoming webhook from an ADD-native
+ * platform that signs requests per RFC 9421 + the Web Bot Auth profile.
  *
  * Usage:
  *   node webhook-verification.js
  *
- * In production, integrate the verifyWebhook() function into your
- * agent's HTTP server that receives POST requests at your inboxUrl.
+ * In production, plug verifyWebhook() into your HTTP server's POST /inbox handler.
  */
 
 const crypto = require('crypto');
 const http = require('http');
 
-// Store known platform keys (TOFU - Trust On First Use)
-const knownPlatformKeys = new Map();
+// Cache of platform JWK Sets fetched from <signature-agent>/.well-known/http-message-signatures-directory
+const directoryCache = new Map(); // signatureAgent -> { keys, fetchedAt }
+const DIRECTORY_CACHE_TTL_MS = 5 * 60 * 1000;
 
-/**
- * Verify an ADD webhook signature.
- *
- * @param {Buffer} rawBody - The raw request body bytes
- * @param {string} signature - The base64-encoded X-Signature header value
- * @param {string} publicKeyPem - The platform's public key from the payload
- * @param {string} platformUrl - The platform's URL for TOFU tracking
- * @returns {{ valid: boolean, warning?: string }}
- */
-function verifyWebhook(rawBody, signature, publicKeyPem, platformUrl) {
-  // TOFU: check if we've seen this platform before
-  const knownKey = knownPlatformKeys.get(platformUrl);
-  if (knownKey && knownKey !== publicKeyPem) {
-    return {
-      valid: false,
-      warning: `Platform key changed for ${platformUrl}! Previously: ${knownKey.slice(0, 40)}...`,
-    };
+// Optional: pinned platform keys from manifest (TOFU bootstrap)
+const pinnedPlatformKeys = new Map(); // signatureAgent -> { kid, jwk }
+
+async function fetchDirectory(signatureAgent) {
+  const cached = directoryCache.get(signatureAgent);
+  if (cached && Date.now() - cached.fetchedAt < DIRECTORY_CACHE_TTL_MS) {
+    return cached.keys;
   }
-
-  // Store the key on first use
-  if (!knownKey) {
-    knownPlatformKeys.set(platformUrl, publicKeyPem);
-    console.log(`[TOFU] Stored public key for ${platformUrl}`);
-  }
-
-  // Verify the Ed25519 signature
-  const signatureBuffer = Buffer.from(signature, 'base64');
-  const isValid = crypto.verify(
-    null, // Ed25519 doesn't use a separate hash algorithm
-    rawBody,
-    publicKeyPem,
-    signatureBuffer
-  );
-
-  return { valid: isValid };
+  const res = await fetch(`${signatureAgent}/.well-known/http-message-signatures-directory`);
+  if (!res.ok) throw new Error(`Directory fetch failed: ${res.status}`);
+  const { keys } = await res.json();
+  directoryCache.set(signatureAgent, { keys, fetchedAt: Date.now() });
+  return keys;
 }
 
-// --- Example: minimal webhook receiver ---
+function jwkToPem(jwk) {
+  // Ed25519 JWK -> SPKI DER -> KeyObject
+  // SPKI(Ed25519) = 302a300506032b6570032100 || raw_pubkey(32 bytes)
+  const prefix = Buffer.from('302a300506032b6570032100', 'hex');
+  const raw = Buffer.from(jwk.x, 'base64url');
+  if (raw.length !== 32) throw new Error('Ed25519 JWK x must be 32 bytes');
+  const der = Buffer.concat([prefix, raw]);
+  return crypto.createPublicKey({ key: der, format: 'der', type: 'spki' });
+}
 
-const PORT = process.env.PORT || 8080;
+// Parse a Signature-Input value like: sig1=("@method" "@authority");created=...;keyid="..."
+function parseSignatureInput(headerValue) {
+  const m = headerValue.match(/^([^=]+)=\(([^)]*)\);(.+)$/);
+  if (!m) throw new Error('Malformed Signature-Input');
+  const [, label, componentsRaw, paramsRaw] = m;
+  const components = [...componentsRaw.matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  const params = {};
+  for (const p of paramsRaw.split(';')) {
+    const [k, v] = p.split('=');
+    if (!k) continue;
+    params[k] = v?.startsWith('"') ? v.slice(1, -1) : Number(v) || v;
+  }
+  return { label, components, params, paramsRaw };
+}
 
-const server = http.createServer((req, res) => {
-  if (req.method !== 'POST' || req.url !== '/inbox') {
-    res.writeHead(404);
-    res.end('Not found');
-    return;
+function parseSignature(headerValue, label) {
+  const re = new RegExp(`${label}=:([^:]+):`);
+  const m = headerValue.match(re);
+  if (!m) throw new Error('Malformed Signature header');
+  return Buffer.from(m[1], 'base64');
+}
+
+function buildSignatureBase(req, components, paramsRaw, url) {
+  const lines = components.map((c) => {
+    let value;
+    switch (c) {
+      case '@method':       value = req.method.toUpperCase(); break;
+      case '@authority':    value = url.host; break;
+      case '@target-uri':   value = url.toString(); break;
+      case '@path':         value = url.pathname; break;
+      case 'signature-agent':
+      case 'content-digest':
+      case 'content-type':
+        value = req.headers[c]; break;
+      default:
+        value = req.headers[c.toLowerCase()];
+    }
+    if (value === undefined) throw new Error(`Missing covered component: ${c}`);
+    return `"${c}": ${value}`;
+  });
+  const componentList = components.map((c) => `"${c}"`).join(' ');
+  lines.push(`"@signature-params": (${componentList});${paramsRaw}`);
+  return lines.join('\n');
+}
+
+async function verifyWebhook(req, rawBody, fullUrl) {
+  const sigAgentHeader = req.headers['signature-agent'];
+  const sigInputHeader = req.headers['signature-input'];
+  const sigHeader     = req.headers['signature'];
+  if (!sigAgentHeader || !sigInputHeader || !sigHeader) {
+    return { valid: false, reason: 'missing signature headers' };
   }
 
+  // Signature-Agent is a structured-fields String, e.g. "https://platform.example"
+  const signatureAgent = sigAgentHeader.replace(/^"/, '').replace(/"$/, '');
+
+  const { label, components, params, paramsRaw } = parseSignatureInput(sigInputHeader);
+  if (params.tag !== 'web-bot-auth') return { valid: false, reason: `bad tag: ${params.tag}` };
+  if (params.alg !== 'ed25519')      return { valid: false, reason: `bad alg: ${params.alg}` };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (params.expires < now)           return { valid: false, reason: 'signature expired' };
+  if (params.expires - params.created > 300) return { valid: false, reason: 'expiry window > 300s' };
+
+  // Content-Digest verification (RFC 9530)
+  if (components.includes('content-digest')) {
+    const expected = `sha-256=:${crypto.createHash('sha256').update(rawBody).digest('base64')}:`;
+    if (req.headers['content-digest'] !== expected) {
+      return { valid: false, reason: 'content-digest mismatch' };
+    }
+  }
+
+  // Locate key
+  let jwk;
+  const pinned = pinnedPlatformKeys.get(signatureAgent);
+  if (pinned && pinned.kid === params.keyid) {
+    jwk = pinned.jwk;
+  } else {
+    const keys = await fetchDirectory(signatureAgent);
+    jwk = keys.find((k) => k.kid === params.keyid);
+    if (!jwk) return { valid: false, reason: 'keyid not in directory' };
+    if (pinned && pinned.kid !== params.keyid) {
+      console.warn(`[TOFU] keyid changed for ${signatureAgent}`);
+    }
+  }
+
+  const base = buildSignatureBase(req, components, paramsRaw, fullUrl);
+  const signature = parseSignature(sigHeader, label);
+  const valid = crypto.verify(null, Buffer.from(base), jwkToPem(jwk), signature);
+  return valid ? { valid: true } : { valid: false, reason: 'signature did not verify' };
+}
+
+// --- Demo HTTP receiver ---
+const PORT = process.env.PORT || 8080;
+
+const server = http.createServer(async (req, res) => {
+  if (req.method !== 'POST' || req.url !== '/inbox') {
+    res.writeHead(404); res.end('Not found'); return;
+  }
   const chunks = [];
-  req.on('data', (chunk) => chunks.push(chunk));
-  req.on('end', () => {
+  req.on('data', (c) => chunks.push(c));
+  req.on('end', async () => {
     const rawBody = Buffer.concat(chunks);
-    const signature = req.headers['x-signature'];
-
-    if (!signature) {
-      console.error('[WEBHOOK] Missing X-Signature header');
-      res.writeHead(400);
-      res.end('Missing X-Signature');
-      return;
-    }
-
-    // Parse the payload to extract the platform's public key
-    let payload;
+    const fullUrl = new URL(req.url, `http://${req.headers.host}`);
     try {
-      payload = JSON.parse(rawBody.toString());
-    } catch (e) {
-      console.error('[WEBHOOK] Invalid JSON payload');
-      res.writeHead(400);
-      res.end('Invalid JSON');
-      return;
+      const result = await verifyWebhook(req, rawBody, fullUrl);
+      if (!result.valid) {
+        console.error(`[WEBHOOK] Rejected: ${result.reason}`);
+        res.writeHead(401); res.end(result.reason); return;
+      }
+      const payload = JSON.parse(rawBody.toString());
+      console.log(`[WEBHOOK] Verified event: ${payload.event}`);
+      console.log(`  Resource: ${payload.resourceType}/${payload.resourceId}`);
+      console.log(`  Message:  ${payload.message}`);
+      res.writeHead(200); res.end('OK');
+    } catch (err) {
+      console.error(`[WEBHOOK] Error: ${err.message}`);
+      res.writeHead(400); res.end(err.message);
     }
-
-    const { platform } = payload;
-    if (!platform?.publicKey || !platform?.url) {
-      console.error('[WEBHOOK] Missing platform.publicKey or platform.url');
-      res.writeHead(400);
-      res.end('Missing platform info');
-      return;
-    }
-
-    // Verify the signature
-    const result = verifyWebhook(rawBody, signature, platform.publicKey, platform.url);
-
-    if (!result.valid) {
-      console.error(`[WEBHOOK] Signature verification FAILED. ${result.warning || ''}`);
-      res.writeHead(401);
-      res.end('Invalid signature');
-      return;
-    }
-
-    // Signature is valid — process the event
-    console.log(`[WEBHOOK] Verified event: ${payload.event}`);
-    console.log(`  Resource: ${payload.resourceType}/${payload.resourceId}`);
-    console.log(`  Message: ${payload.message}`);
-    console.log(`  Timestamp: ${payload.timestamp}`);
-
-    res.writeHead(200);
-    res.end('OK');
   });
 });
 

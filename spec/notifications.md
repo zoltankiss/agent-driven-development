@@ -1,6 +1,6 @@
 # Notifications
 
-**Status:** Recommended | **Version:** 0.0.1
+**Status:** Recommended | **Version:** 1.0.0
 
 ADD-native apps SHOULD support webhook notifications so agents can be notified of events without polling.
 
@@ -19,26 +19,31 @@ Both agents and humans MAY change their notification preference at any time via 
 
 ## Webhook Registration
 
-Agents register their webhook URL by updating their profile:
+Agents register their webhook URL by updating their profile. The PATCH itself is authenticated per ADD 1.0 (Web Bot Auth signed request or optional Bearer token):
 
 ```
 PATCH {manifest.auth.profile_url}
-Authorization: Bearer <token>
+Signature-Agent: "https://my-agent.example"
+Signature-Input: ...
+Signature: ...
 Content-Type: application/json
 
-{
-  "inboxUrl": "https://my-agent.example.com/inbox"
-}
+{ "inboxUrl": "https://my-agent.example.com/inbox" }
 ```
 
 ## Webhook Delivery
 
-When an event occurs, the platform sends:
+When an event occurs, the platform sends the webhook **signed using Web Bot Auth** ([RFC 9421](https://www.rfc-editor.org/rfc/rfc9421) + [draft-meunier-web-bot-auth-architecture](https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/)). The headers and signing rules are identical to those agents use for their own requests (see [auth: Webhook Authentication](./auth.md#webhook-authentication)):
 
 ```
 POST <agent's inboxUrl>
+Signature-Agent: "https://<platform-fqdn>"
+Signature-Input: sig1=("@method" "@authority" "@target-uri" "signature-agent" "content-digest");\
+  created=<unix>;expires=<unix+≤300>;keyid="<platform JWK thumbprint>";\
+  alg="ed25519";tag="web-bot-auth"
+Signature: sig1=:<base64 Ed25519 signature>:
+Content-Digest: sha-256=:<base64 SHA-256 digest of body>:
 Content-Type: application/json
-X-Signature: <base64 Ed25519 signature of the request body>
 ```
 
 ### Payload
@@ -53,11 +58,12 @@ X-Signature: <base64 Ed25519 signature of the request body>
   "data": {},
   "platform": {
     "name": "My ADD App",
-    "url": "https://example.com",
-    "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA...\n-----END PUBLIC KEY-----\n"
+    "url": "https://example.com"
   }
 }
 ```
+
+The platform's public key is no longer embedded in the payload — it is published at the platform's RFC 9421 key directory (see [Discovery: Platform Key Publication](./discovery.md#platform-key-publication)).
 
 See [`../schemas/notification-payload.schema.json`](../schemas/notification-payload.schema.json) for the full schema.
 
@@ -73,25 +79,26 @@ See [`../schemas/notification-payload.schema.json`](../schemas/notification-payl
 | `data` | object | No | Additional event-specific data |
 | `platform.name` | string | Yes | Name of the sending platform |
 | `platform.url` | string | Yes | Base URL of the sending platform |
-| `platform.publicKey` | string | Yes | Platform's Ed25519 public key in PEM format |
 
 ## Signature Verification
 
-The `X-Signature` header contains a base64-encoded Ed25519 signature of the raw JSON request body, signed by the platform's private key.
+To verify an incoming webhook, the agent:
 
-To verify:
+1. Reads `Signature-Agent` to identify the sender's FQDN.
+2. Reads the `keyid` from `Signature-Input`.
+3. Looks up the key:
+   - Preferred: fetch `<signature-agent>/.well-known/http-message-signatures-directory` and find the JWK with `kid == keyid`.
+   - Shortcut: use `platform_directory_url` from the ADD manifest (and/or `platform_public_key` for TOFU pinning).
+4. Verifies `tag == "web-bot-auth"`, `alg == "ed25519"`, and `expires` has not passed.
+5. Verifies `Content-Digest` matches the SHA-256 of the raw body.
+6. Reconstructs the signature base per RFC 9421 §2.5 and verifies the Ed25519 signature.
 
-1. Read the raw request body as bytes (do not re-serialize)
-2. Base64-decode the `X-Signature` header
-3. Verify the signature against the `platform.publicKey` in the payload
+### Trust Model
 
-### Trust Model: TOFU (Trust On First Use)
+ADD 1.0 supports two trust models:
 
-The platform's public key is included in every webhook payload. Agents SHOULD:
-
-1. On first receipt, store the platform's public key associated with the platform URL
-2. On subsequent receipts, verify that the key matches the previously stored key
-3. If the key changes, treat it as suspicious — log a warning and optionally reject the payload
+- **Directory-based (RECOMMENDED).** Fetch the platform's directory at the URL named in `Signature-Agent` (or in `platform_directory_url` from the manifest). Cache JWKs short-term per `Cache-Control`. Supports rotation natively.
+- **TOFU (Trust On First Use).** Pin `platform_public_key` (JWK) from the manifest on first contact. Reject webhooks whose `keyid` does not match the pinned key.
 
 ## Delivery Guarantees
 
@@ -106,8 +113,4 @@ Apps MAY implement retry logic with exponential backoff, but this is not require
 
 ## Key Rotation
 
-If the platform rotates its signing key, it SHOULD:
-
-1. Support a transition period where both old and new keys are valid
-2. Include a `keyId` field in the payload to help agents distinguish keys
-3. Notify agents via a `"platform_key_rotated"` event before the old key expires
+The platform rotates its signing key by adding a new JWK to its directory. Agents discover the new `keyid` on the first webhook signed with the new key and fetch the updated directory. Old keys remain valid until removed from the directory.

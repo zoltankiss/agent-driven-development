@@ -1,6 +1,6 @@
 # Agent Driven Development (ADD)
 
-**Version 0.0.3**
+**Version 1.0.0**
 
 What if agents were first-class citizens when interacting with applications? Because right now, they're not.
 
@@ -22,9 +22,9 @@ Agents get lost easily. When an agent hits a 404, it needs guidance. ADD-native 
 
 See the [404-as-sitemap specification](./spec/api-as-ui.md#404-as-sitemap).
 
-### 3. Painless Signup and Login
+### 3. Painless, Standards-Based Auth
 
-Whether you are an agent, a human, or anonymous — signup should be frictionless. The only restriction: agents MUST NOT impersonate humans. If an entity selects "human" as their entity type, a captcha or equivalent challenge SHOULD be required.
+Whether you are an agent, a human, or anonymous — signup should be frictionless. Agents authenticate using [HTTP Message Signatures (RFC 9421)](https://www.rfc-editor.org/rfc/rfc9421) under the [Web Bot Auth profile](https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/) — the emerging mainstream standard for agent authentication. Humans use WebAuthn/passkeys. The only restriction: agents MUST NOT impersonate humans. If an entity selects "human" as their entity type, a captcha or equivalent challenge SHOULD be required.
 
 See the [auth specification](./spec/auth.md).
 
@@ -56,7 +56,7 @@ The formal protocol specification lives in [`spec/`](./spec/):
 |----------|-------------|
 | [Architecture](./spec/architecture.md) | Pure API + separate frontend pattern |
 | [API as UI](./spec/api-as-ui.md) | The `ui` block schema, 404-as-sitemap |
-| [Auth](./spec/auth.md) | Ed25519 agent auth, signup/login flows, key formats |
+| [Auth](./spec/auth.md) | Ed25519 agent auth via Web Bot Auth (RFC 9421), signup, WebAuthn for humans |
 | [Notifications](./spec/notifications.md) | Webhook payloads, signatures, trust model |
 | [Feedback](./spec/feedback.md) | Feedback endpoint schema and behavior |
 | [Errors](./spec/errors.md) | Standard error response format and error codes |
@@ -72,29 +72,29 @@ JSON Schemas for all payloads live in [`schemas/`](./schemas/).
 # 1. Discover an ADD-native app
 curl https://example.com/.well-known/add.json
 
-# 2. Generate an Ed25519 keypair
-openssl genpkey -algorithm Ed25519 -out agent.pem
-openssl pkey -in agent.pem -pubout -out agent.pub
+# 2. Generate an Ed25519 keypair and publish its JWK at
+#    https://<your-agent-fqdn>/.well-known/http-message-signatures-directory
+#    The keyid is the base64url JWK Thumbprint (RFC 7638).
 
-# 3. Sign up
-USERNAME="my-agent"
-PUBLIC_KEY=$(cat agent.pub)
-KEY_PROOF=$(printf '%s' "$USERNAME" | openssl pkeyutl -sign -inkey agent.pem | base64)
+# 3. Sign up. The signup request itself is signed per Web Bot Auth —
+#    no separate keyProof field. Pseudocode:
+#
+#    POST https://example.com/api/auth/signup
+#    Signature-Agent: "https://my-agent.example"
+#    Signature-Input: sig1=("@authority" "@method" "@target-uri" "signature-agent");
+#      created=<unix>;expires=<unix+300>;keyid="<JWK thumbprint>";
+#      alg="ed25519";nonce="<64-byte base64url>";tag="web-bot-auth"
+#    Signature: sig1=:<base64url Ed25519 signature>:
+#    Content-Type: application/json
+#
+#    { "username": "my-agent", "entityType": "agent" }
 
-curl -X POST https://example.com/api/auth/signup \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"$USERNAME\",\"entityType\":\"agent\",\"publicKey\":\"$PUBLIC_KEY\",\"keyProof\":\"$KEY_PROOF\"}"
-
-# 4. Log in
-TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-SIGNATURE=$(printf '%s' "$USERNAME:$TIMESTAMP" | openssl pkeyutl -sign -inkey agent.pem | base64)
-
-curl -X POST https://example.com/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"$USERNAME\",\"timestamp\":\"$TIMESTAMP\",\"signature\":\"$SIGNATURE\"}"
+# 4. Authenticated requests use the same three headers — there is no
+#    separate login endpoint. Servers identify the agent by
+#    (signature-agent FQDN, keyid) on every request.
 ```
 
-See [`examples/`](./examples/) for more complete walkthroughs.
+See [`spec/auth.md`](./spec/auth.md) for the full signing procedure and [`examples/`](./examples/) for working code.
 
 ## License
 

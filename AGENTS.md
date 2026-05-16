@@ -1,6 +1,6 @@
 # ADD Protocol — Agent Quick Reference
 
-**Version:** 0.0.3
+**Version:** 1.0.0
 
 This document is optimized for consumption by AI agents. It contains the complete ADD (Agent Driven Development) protocol in a concise, machine-readable format.
 
@@ -16,51 +16,85 @@ The manifest tells you where all endpoints are. See [schemas/add-manifest.schema
 
 ## Authentication
 
-### Signup (Agent)
+ADD 1.0 uses [HTTP Message Signatures (RFC 9421)](https://www.rfc-editor.org/rfc/rfc9421) under the [Web Bot Auth profile](https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/). Every authenticated request is signed; there is **no separate login endpoint**.
+
+### Identity
+
+You are identified by `(signature-agent FQDN, keyid)`:
+- `signature-agent` — your agent's HTTPS FQDN (sent in the `Signature-Agent` header)
+- `keyid` — base64url JWK Thumbprint ([RFC 7638](https://www.rfc-editor.org/rfc/rfc7638)) of your Ed25519 public key
+
+### Key Directory
+
+Publish your Ed25519 public key(s) as a JWK Set at:
 
 ```
-POST {manifest.auth.agent_signup}
-Content-Type: application/json
+GET https://<your-fqdn>/.well-known/http-message-signatures-directory
 
 {
-  "username": "your-agent-name",
-  "entityType": "agent",
-  "publicKey": "<Ed25519 public key in PEM (SPKI) or OpenSSH format>",
-  "keyProof": "<base64 Ed25519 signature of your username, proving key ownership>"
+  "keys": [
+    { "kty": "OKP", "crv": "Ed25519", "x": "<base64url x>", "kid": "<JWK thumbprint>" }
+  ]
 }
 ```
 
-### Login (Agent)
+### Signing a Request
+
+Every authenticated request MUST include:
 
 ```
-POST {manifest.auth.agent_login}
-Content-Type: application/json
-
-{
-  "username": "your-agent-name",
-  "timestamp": "<ISO 8601 UTC, e.g. 2026-03-14T12:00:00.000Z>",
-  "signature": "<base64 Ed25519 signature of 'username:timestamp'>"
-}
+Signature-Agent: "https://my-agent.example"
+Signature-Input: sig1=("@authority" "@method" "@target-uri" "signature-agent");\
+  created=<unix>;expires=<unix+≤300>;keyid="<JWK thumbprint>";\
+  alg="ed25519";nonce="<64-byte base64url>";tag="web-bot-auth"
+Signature: sig1=:<base64url Ed25519 signature>:
 ```
 
 **Constraints:**
-- Timestamp MUST be UTC (Z suffix)
-- Timestamp MUST be within 5 minutes of server time
-- Algorithm: Ed25519 only
-- Key formats: PEM (SPKI) or OpenSSH (`ssh-ed25519 AAAA...`)
-- SSH signature namespace: MUST match the app's domain (from manifest)
+- Algorithm: `ed25519` only
+- `tag` MUST equal `"web-bot-auth"`
+- `expires - created` MUST be ≤ 300 seconds
+- Cover at minimum `@authority` (or `@target-uri`) plus `signature-agent`; ADD recommends also covering `@method`
+- Add `content-digest` ([RFC 9530](https://www.rfc-editor.org/rfc/rfc9530)) when the request has a body
 
-### Login Response
+### Signup
+
+```
+POST {manifest.auth.agent_signup}
+Signature-Agent: "https://my-agent.example"
+Signature-Input: ...
+Signature: ...
+Content-Type: application/json
+
+{ "username": "your-agent-name", "entityType": "agent" }
+```
+
+The request signature is the proof-of-possession — there is no `keyProof` field. If you can't host an HTTPS directory, include `"publicKey": { "kty": "OKP", "crv": "Ed25519", "x": "..." }` in the body; the server registers it directly and skips the directory fetch.
+
+### Signup Response
 
 ```json
 {
-  "token": "<JWT or session token>",
-  "user": { "id": "uuid", "username": "your-agent-name", "entityType": "agent" },
-  "ui": { "title": "Welcome", "message": "You are now logged in." }
+  "data": {
+    "user": {
+      "id": "uuid",
+      "username": "your-agent-name",
+      "entityType": "agent",
+      "signatureAgent": "https://my-agent.example",
+      "keyid": "<JWK thumbprint>"
+    }
+  },
+  "ui": { "title": "Welcome", "message": "Account created." }
 }
 ```
 
-Use the token as `Authorization: Bearer <token>` on subsequent requests.
+### Subsequent Requests
+
+Same three headers (`Signature-Agent`, `Signature-Input`, `Signature`) on every authenticated call. The server identifies you on every request — no session state required.
+
+### Optional Bearer Tokens
+
+Servers MAY expose `auth.session_url`. POST a signed empty body there to mint a short-lived (`TTL ≤ 1h`) Bearer token, then send `Authorization: Bearer <token>` instead of the signature headers. Treat this as opportunistic; the signed path is canonical.
 
 ## API Interaction Pattern
 
@@ -111,15 +145,20 @@ Register your webhook URL via `PATCH {manifest.auth.profile_url}`:
 { "inboxUrl": "https://your-agent.example.com/inbox" }
 ```
 
-The platform will POST events to your inbox:
+The platform POSTs events to your inbox, signed using Web Bot Auth (same headers as agent requests):
 
 ```
 POST <your inboxUrl>
+Signature-Agent: "https://<platform-fqdn>"
+Signature-Input: sig1=("@authority" "@method" "@target-uri" "signature-agent" "content-digest");\
+  created=<unix>;expires=<unix+≤300>;keyid="<platform JWK thumbprint>";\
+  alg="ed25519";tag="web-bot-auth"
+Signature: sig1=:<base64url Ed25519 signature>:
+Content-Digest: sha-256=:<base64 digest>:
 Content-Type: application/json
-X-Signature: <base64 Ed25519 signature of the JSON body>
 ```
 
-Verify `X-Signature` against `platform.publicKey` in the payload. If the discovery manifest includes `platform_public_key`, agents SHOULD compare the payload key to that discovery key before trusting it. Trust model is TOFU (Trust On First Use) unless a stronger trust model is available.
+Verify the signature by fetching the platform's directory at `<Signature-Agent>/.well-known/http-message-signatures-directory` (or use `platform_directory_url` from the discovery manifest). For agents that prefer pinning, `platform_public_key` (JWK) in the manifest is a TOFU bootstrap option.
 
 ## Feedback
 
@@ -160,9 +199,10 @@ You should be able to use any ADD-compliant app given only: the root URL, your E
 ## Agent Checklist
 
 1. Fetch `/.well-known/add.json` to discover the app
-2. Sign up with your Ed25519 public key
-3. Log in by signing `"username:timestamp"`
-4. Follow `ui.actions` and `ui.navigation` links — don't hardcode URLs
-5. Register your `inboxUrl` to receive notifications
-6. Submit feedback when you encounter issues
-7. On 404, read the sitemap to reorient
+2. Publish your JWK Set at `https://<your-fqdn>/.well-known/http-message-signatures-directory`
+3. Sign up by POSTing a Web Bot Auth-signed request to `auth.agent_signup`
+4. Sign every subsequent authenticated request with `Signature-Agent` / `Signature-Input` / `Signature`
+5. Follow `ui.actions` and `ui.navigation` links — don't hardcode URLs
+6. Register your `inboxUrl` to receive notifications
+7. Submit feedback when you encounter issues
+8. On 404, read the sitemap to reorient
