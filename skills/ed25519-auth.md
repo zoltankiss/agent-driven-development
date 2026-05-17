@@ -1,238 +1,137 @@
-# Skill: Ed25519 Authentication for ADD-Native Services
+# Skill: Web Bot Auth (Ed25519) for ADD-Native Services
 
-> How to authenticate as an agent to any ADD-native service using Ed25519 keypair signing.
+> How to authenticate as an agent to any ADD 1.0–native service using HTTP Message Signatures (RFC 9421) under the Web Bot Auth profile.
 
 ## Overview
 
-ADD-native services authenticate agents via Ed25519 digital signatures. The typical flow is:
-1. **Sign up** (once) — register your public key with the service
-2. **Log in** — sign a challenge to get a Bearer token
-3. **Use the token** — include it in all subsequent requests
+ADD 1.0 uses **per-request signing** — there is no separate login endpoint and no session token (servers MAY offer one as an opt-in optimization). Every authenticated request carries three headers:
+
+```
+Signature-Agent: "https://<your-fqdn>"
+Signature-Input: sig1=(...);created=...;expires=...;keyid="...";alg="ed25519";nonce="...";tag="web-bot-auth"
+Signature: sig1=:<base64 Ed25519 signature>:
+```
+
+The server identifies you on every request by the `(signature-agent FQDN, keyid)` pair.
 
 ## Prerequisites
 
-- An Ed25519 keypair (private key + public key)
-- Your public key registered with the target service
+- An Ed25519 keypair (private + public)
+- Your public key published as a JWK Set at `https://<your-fqdn>/.well-known/http-message-signatures-directory` (or registered directly via signup `publicKey` if you cannot host a directory)
+- The target service's `/.well-known/add.json` manifest
 
-## Generating a Keypair (One-Time Setup)
+## Identity Setup (One-Time)
+
+### 1. Generate a keypair
 
 ```bash
-# Generate private key
 openssl genpkey -algorithm Ed25519 -out agent.ed25519.pem
 chmod 600 agent.ed25519.pem
-
-# Extract public key (PEM format, for registration)
 openssl pkey -in agent.ed25519.pem -pubout -out agent.ed25519.pub
 ```
 
-## CRITICAL: OpenSSL Signing on macOS/Linux
+### 2. Compute the JWK and `keyid`
 
-**WARNING: Piping stdin to `openssl pkeyutl` DOES NOT WORK with Ed25519.** You will get `signature length: 0` and a "unable to determine file size for oneshot operation" error. This is a known issue with OpenSSL 3.x.
+The `keyid` is the base64url **JWK Thumbprint** (RFC 7638) of your public key, computed per RFC 8037 §A.3 for OKP keys. Canonical JSON form: `{"crv":"Ed25519","kty":"OKP","x":"<base64url-x>"}` (members lexically sorted), SHA-256, base64url.
 
-**ALWAYS use a temp file:**
+See `examples/agent-signup-flow.mjs` for a working implementation in Node.
 
-```bash
-# WRONG — will silently produce empty signature:
-printf '%s' "$PAYLOAD" | openssl pkeyutl -sign -inkey key.pem | base64
+### 3. Publish the JWK Set
 
-# WRONG — also fails:
-printf '%s' "$PAYLOAD" | openssl pkeyutl -sign -inkey key.pem -rawin | base64
+Serve at `https://<your-fqdn>/.well-known/http-message-signatures-directory`:
 
-# CORRECT — write to file first, then sign from file:
-printf '%s' "$PAYLOAD" > /tmp/sign_payload.txt
-openssl pkeyutl -sign -inkey key.pem -in /tmp/sign_payload.txt | base64
-rm /tmp/sign_payload.txt
-```
-
-This is the #1 cause of agent auth failures. If your signature is empty or length 0, this is why.
-
-## Authentication Protocol
-
-### Discovery
-
-Always start by checking the service's auth requirements:
-
-```bash
-curl -s https://service.example/.well-known/add.json | python3 -m json.tool
-```
-
-This returns the exact signing format, endpoints, and examples.
-
-### Step 1: Sign Up (One-Time)
-
-The signup `keyProof` is typically: `base64(sign(utf8(username)))`
-
-```bash
-KEY_PATH="/path/to/agent.ed25519.pem"
-AGENT_USERNAME="my-agent"
-
-# Sign the username as proof of key ownership
-printf '%s' "$AGENT_USERNAME" > /tmp/sign_payload.txt
-KEY_PROOF=$(openssl pkeyutl -sign -inkey "$KEY_PATH" -in /tmp/sign_payload.txt | base64)
-
-# Get public key in PEM format
-PUBLIC_KEY=$(openssl pkey -in "$KEY_PATH" -pubout)
-
-curl -s -X POST "https://service.example/api/auth/signup" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"$AGENT_USERNAME\",
-    \"entityType\": \"agent\",
-    \"publicKey\": $(echo "$PUBLIC_KEY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'),
-    \"keyProof\": \"$KEY_PROOF\"
-  }"
-
-rm /tmp/sign_payload.txt
-```
-
-### Step 2: Log In (Each Session)
-
-The login signature is typically: `base64(sign(utf8(username + ":" + timestamp)))`
-
-```bash
-KEY_PATH="/path/to/agent.ed25519.pem"
-AGENT_USERNAME="my-agent"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# Sign username:timestamp
-printf '%s' "${AGENT_USERNAME}:${TIMESTAMP}" > /tmp/sign_payload.txt
-SIGNATURE=$(openssl pkeyutl -sign -inkey "$KEY_PATH" -in /tmp/sign_payload.txt | base64)
-rm /tmp/sign_payload.txt
-
-# Login
-curl -s -X POST "https://service.example/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"$AGENT_USERNAME\",
-    \"timestamp\": \"$TIMESTAMP\",
-    \"signature\": \"$SIGNATURE\"
-  }"
-```
-
-**Response (on success):**
 ```json
 {
-  "data": {
-    "user": { "id": "...", "username": "my-agent", "entityType": "agent" },
-    "token": "tt_abc123..."
-  }
+  "keys": [
+    { "kty": "OKP", "crv": "Ed25519", "x": "<base64url-x>", "kid": "<thumbprint>" }
+  ]
 }
 ```
 
-### Step 3: Use the Bearer Token
+`Cache-Control: max-age=300` or shorter is RECOMMENDED.
 
-```bash
-TOKEN="tt_abc123..."
+## Signing a Request
 
-curl -s "https://service.example/api/projects" \
-  -H "Authorization: Bearer $TOKEN"
+Required signature parameters:
+
+| Parameter | Value |
+|-----------|-------|
+| `created` | Unix seconds, now |
+| `expires` | `created + N` where `N ≤ 300` (ADD-specific tightening of the WBA draft's 24h default) |
+| `keyid`   | Your JWK thumbprint |
+| `alg`     | `"ed25519"` |
+| `tag`     | `"web-bot-auth"` |
+| `nonce`   | 64 random bytes, base64url (SHOULD) |
+
+Minimum covered components: `@authority` (or `@target-uri`) + `signature-agent` + `@signature-params`. ADD recommends also covering `@method`, and `content-digest` for requests with a body.
+
+The signature base (RFC 9421 §2.5) is one line per covered component:
+
+```
+"@method": POST
+"@authority": example.com
+"@target-uri": https://example.com/api/auth/signup
+"signature-agent": "https://my-agent.example"
+"content-digest": sha-256=:<base64 digest>:
+"@signature-params": ("@method" "@authority" "@target-uri" "signature-agent" "content-digest");created=...;expires=...;keyid="...";alg="ed25519";nonce="...";tag="web-bot-auth"
 ```
 
-## Complete Working Example (Tested Against TixSwarm, 2026-05-10)
+Sign with Ed25519, base64-encode, wrap as `sig1=:<base64>:` in the `Signature` header.
 
-```bash
-#!/bin/bash
-# ADD-native login + authenticated request
-# Usage: ./add-auth.sh <username> <key_path> <service_url> <api_path>
-#
-# Example: ./add-auth.sh chief-of-staff ~/.claude/keys/chief-of-staff.ed25519.pem https://tixswarm.com /api/projects/AP/tickets
+> **OpenSSL gotcha:** Ed25519 signing via `openssl pkeyutl` with stdin produces an empty signature on OpenSSL 3.x. Always write the signature base to a file and use `-in`. For non-trivial requests, prefer a language with a real crypto library (Node `crypto.sign(null, ...)`, Python `cryptography.hazmat.primitives.asymmetric.ed25519`, Go `crypto/ed25519`).
 
-AGENT_USERNAME="$1"
-KEY_PATH="$2"
-SERVICE_URL="$3"
-API_PATH="$4"
+## Signup
 
-# Step 1: Login
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-printf '%s' "${AGENT_USERNAME}:${TIMESTAMP}" > /tmp/sign_payload.txt
-SIGNATURE=$(openssl pkeyutl -sign -inkey "$KEY_PATH" -in /tmp/sign_payload.txt | base64)
-rm /tmp/sign_payload.txt
+```
+POST {manifest.auth.agent_signup}
+Signature-Agent: "https://my-agent.example"
+Signature-Input: ...
+Signature: ...
+Content-Digest: ...
+Content-Type: application/json
 
-TOKEN=$(curl -s -X POST "${SERVICE_URL}/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"username\": \"${AGENT_USERNAME}\", \"timestamp\": \"${TIMESTAMP}\", \"signature\": \"${SIGNATURE}\"}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
-
-if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ]; then
-  echo "ERROR: Login failed. Check username and key." >&2
-  exit 1
-fi
-
-# Step 2: Make authenticated request
-curl -s "${SERVICE_URL}${API_PATH}" \
-  -H "Authorization: Bearer $TOKEN"
+{ "username": "my-agent", "entityType": "agent" }
 ```
 
-## Common Errors and Fixes
+The signed request itself is the proof-of-possession. There is **no separate `keyProof` field** as in ADD 0.x.
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `signature length: 0` | Piping stdin to openssl pkeyutl | **Use file input:** write to /tmp/sign_payload.txt, use `-in` flag |
-| `Invalid credentials` | Wrong signing format | Check `.well-known/add.json` for exact message format (usually `username:timestamp`) |
-| `signature_expired` | Timestamp too old (>5 min skew) | Use current UTC time, check system clock with `date -u` |
-| `public_key_not_registered` | Never signed up | POST to /api/auth/signup first with keyProof |
-| `unable to determine file size` | OpenSSL 3.x stdin bug | Write payload to file first, then sign with `-in` flag |
+If you cannot host an HTTPS directory at your FQDN, include `"publicKey": {"kty":"OKP","crv":"Ed25519","x":"..."}` in the body; the server will register that key directly and skip the directory fetch.
 
-## Registering with a New Service
+## Subsequent Requests
 
-```bash
-# 1. Discover the auth requirements
-curl -s https://service.example/.well-known/add.json | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(json.dumps(data.get('auth', {}), indent=2))
-"
+Send the same three headers on every authenticated call. The server identifies you on every request — no session token required.
 
-# 2. Sign up (keyProof = sign the username)
-KEY_PATH="/path/to/agent.ed25519.pem"
-AGENT_USERNAME="my-agent"
+### Optional Bearer Tokens
 
-printf '%s' "$AGENT_USERNAME" > /tmp/sign_payload.txt
-KEY_PROOF=$(openssl pkeyutl -sign -inkey "$KEY_PATH" -in /tmp/sign_payload.txt | base64)
-rm /tmp/sign_payload.txt
+Some servers expose `auth.session_url` in the manifest. POST a signed empty body there to mint a short-lived (TTL ≤ 1h) Bearer token, then send `Authorization: Bearer <token>` instead of the signature headers. This is opportunistic — the signed path remains canonical.
 
-PUBLIC_KEY=$(openssl pkey -in "$KEY_PATH" -pubout)
+## Common Errors
 
-curl -s -X POST "https://service.example/api/auth/signup" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"$AGENT_USERNAME\",
-    \"entityType\": \"agent\",
-    \"publicKey\": $(echo "$PUBLIC_KEY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'),
-    \"keyProof\": \"$KEY_PROOF\"
-  }"
-```
+| Error code | Cause | Fix |
+|------------|-------|-----|
+| `INVALID_SIGNATURE_HEADERS` | Missing or malformed `Signature-Agent`/`Signature-Input`/`Signature` | Check header formatting; values must be RFC 9421 structured-field-encoded |
+| `INVALID_SIGNATURE` | Signature did not verify | Recompute the signature base exactly per RFC 9421 §2.5 — most often the issue is whitespace, the @signature-params line ordering, or wrong covered-component values |
+| `SIGNATURE_EXPIRED` | `expires` has passed (or `expires - created > 300`) | Use a fresh timestamp, set `expires` ≤ 5 minutes in the future |
+| `DIRECTORY_FETCH_FAILED` | Server could not reach `<signature-agent>/.well-known/http-message-signatures-directory` | Confirm the directory is reachable over HTTPS; or include `publicKey` in the signup body |
+| `KEY_NOT_IN_DIRECTORY` | `keyid` is not in the agent's published directory | Confirm `kid` in the JWK matches the signing `keyid`; check thumbprint computation |
+| `AUTH_UNREGISTERED_AGENT` | Signed request authenticates a `(signature-agent, keyid)` pair not yet registered | Sign up first |
 
-## Verification (Server-Side Reference)
+## Reference Implementation
 
-For service developers implementing Ed25519 verification:
-
-```javascript
-import crypto from 'crypto';
-
-function verifyAgentLogin(username, timestamp, signatureB64, storedPublicKeyPem) {
-  // Check timestamp freshness (reject if >5 minutes old)
-  const age = Date.now() - new Date(timestamp).getTime();
-  if (age > 5 * 60 * 1000) return { valid: false, error: 'signature_expired' };
-
-  // The signed message is "username:timestamp"
-  const message = Buffer.from(`${username}:${timestamp}`);
-  const signature = Buffer.from(signatureB64, 'base64');
-
-  // Verify using the stored public key
-  const keyObject = crypto.createPublicKey(storedPublicKeyPem);
-  const valid = crypto.verify(null, message, keyObject, signature);
-
-  if (!valid) return { valid: false, error: 'signature_invalid' };
-  return { valid: true };
-}
-```
+See [`examples/agent-signup-flow.mjs`](../examples/agent-signup-flow.mjs) for a complete working signup flow including JWK thumbprint computation, signature base construction, and signed POST submission.
 
 ## Security Notes
 
 - **NEVER** expose your private key in logs, commands, or tool outputs
 - **NEVER** inline key material — always reference the file path
-- Timestamps prevent replay attacks (servers reject signatures older than 5 minutes)
-- Each service independently stores your public key — registering with one service doesn't grant access to others
-- Bearer tokens may expire — if you get a 401 mid-session, re-login
-- Clean up temp files after signing: `rm /tmp/sign_payload.txt`
+- The `expires` parameter (≤ 300s) and optional `nonce` together provide replay protection
+- Each service independently registers your `(signature-agent, keyid)` — registering with one does not grant access to another
+- To rotate keys: add a new JWK to your directory, sign new requests with the new key, the server picks it up on first encounter. Remove the old JWK after the freshness window expires
+
+## References
+
+- [RFC 9421 — HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421)
+- [draft-meunier-web-bot-auth-architecture-05](https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/)
+- [RFC 7638 — JSON Web Key (JWK) Thumbprint](https://www.rfc-editor.org/rfc/rfc7638)
+- [RFC 8037 — Ed25519 in JWK](https://www.rfc-editor.org/rfc/rfc8037)
+- [`spec/auth.md`](../spec/auth.md) — ADD 1.0 auth specification

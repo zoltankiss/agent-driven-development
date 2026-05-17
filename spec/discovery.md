@@ -1,6 +1,6 @@
 # Discovery
 
-**Status:** Required | **Version:** 0.0.1
+**Status:** Required | **Version:** 1.0.0
 
 ADD-native apps MUST serve a discovery manifest so agents can programmatically find all available endpoints and capabilities.
 
@@ -12,20 +12,28 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
 
 ```json
 {
-  "add_version": "0.0.1",
+  "add_version": "1.0.0",
   "app_name": "My ADD App",
   "app_description": "A brief description of what this app does",
   "spec_url": "https://github.com/zoltankiss/agent-driven-development",
   "documentation_url": "/api/docs",
   "openapi_url": "/api/openapi.json",
   "auth": {
+    "protocol": "web-bot-auth",
     "agent_signup": "/api/auth/signup",
-    "agent_login": "/api/auth/login",
     "profile_url": "/api/me",
-    "human_oauth_providers": ["github", "google"],
-    "ssh_namespace": "my-add-app.example.com"
+    "session_url": "/api/auth/session",
+    "human_passkey_register": "/api/auth/passkey/register",
+    "human_passkey_login": "/api/auth/passkey/login",
+    "human_oauth_providers": ["github", "google"]
   },
-  "platform_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA...\n-----END PUBLIC KEY-----\n",
+  "platform_directory_url": "https://my-add-app.example.com/.well-known/http-message-signatures-directory",
+  "platform_public_key": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    "kid": "RkAU8wVqYDjY5R7tF3xkQwYi1c5xqQYHsftUomZ8b-c"
+  },
   "notifications": {
     "webhook_config": "/api/me"
   },
@@ -41,8 +49,6 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
 | `add_version` | string | The ADD spec version this app implements (semver) |
 | `app_name` | string | Human/agent-readable name of the application |
 | `auth.agent_signup` | string | Path to the agent signup endpoint |
-| `auth.agent_login` | string | Path to the agent login endpoint |
-| `auth.ssh_namespace` | string | The namespace string for SSH signature verification (MUST be the app's domain or a unique identifier) |
 
 ### Optional Fields
 
@@ -52,11 +58,14 @@ Every ADD-native app MUST serve a JSON manifest at the well-known URI `/.well-kn
 | `spec_url` | string | URL to the ADD specification |
 | `documentation_url` | string | Path to the app's API documentation |
 | `openapi_url` | string | Path to the app's OpenAPI specification |
+| `auth.protocol` | string | Auth protocol identifier. MUST be `"web-bot-auth"` in ADD 1.0. Reserved for future protocols |
 | `auth.profile_url` | string | Path to view/update current user profile |
+| `auth.session_url` | string | Path to mint an opportunistic Bearer token from a signed request (servers MAY offer; see [auth](./auth.md#optional-bearer-tokens-performance)) |
 | `auth.human_passkey_register` | string | Path to the WebAuthn/passkey registration options endpoint |
 | `auth.human_passkey_login` | string | Path to the WebAuthn/passkey authentication options endpoint |
 | `auth.human_oauth_providers` | string[] | List of supported OAuth providers for humans |
-| `platform_public_key` | string | App/platform Ed25519 public key in PEM format for webhook verification and trust bootstrapping |
+| `platform_directory_url` | string | URL to the platform's RFC 9421 key directory (JWK Set). Agents fetch this to verify platform-signed webhooks |
+| `platform_public_key` | object | Platform's Ed25519 public key as a JWK (`{kty, crv, x, kid}`). Bootstrap shortcut for agents that want TOFU pinning instead of fetching the directory |
 | `notifications.webhook_config` | string | Path to configure webhook notifications |
 | `feedback_url` | string | Path to the feedback endpoint |
 | `sitemap_url` | string | Path to the full sitemap |
@@ -85,8 +94,13 @@ Content-Type: application/json
 This allows agents that land on an unknown URL to discover the app's capabilities.
 
 
-## Platform Public Key
+## Platform Key Publication
 
-Apps SHOULD expose their platform Ed25519 public key in the discovery manifest as `platform_public_key`. This gives agents a standardized place to fetch the sending key before the first webhook arrives, instead of learning it only from webhook payloads.
+Apps SHOULD publish their platform Ed25519 public key for agents to verify signed webhooks (see [auth: Webhook Authentication](./auth.md#webhook-authentication)).
 
-If present, `platform_public_key` MUST be the same key used to sign webhook payloads and other platform-originated signed messages.
+Two manifest fields are available:
+
+- **`platform_directory_url`** (RECOMMENDED) — URL to the platform's RFC 9421 key directory (JWK Set). This is the canonical mechanism; it supports rotation and multi-key publication.
+- **`platform_public_key`** — A single JWK (`{kty: "OKP", crv: "Ed25519", x, kid}`). Bootstrap shortcut for agents that want to pin a key on first contact (TOFU). If present, MUST match a key currently published in the directory.
+
+If both are present, agents SHOULD prefer the directory for live verification and use `platform_public_key` only for initial TOFU pinning.

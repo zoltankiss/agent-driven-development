@@ -192,61 +192,51 @@ Same as 301/302 but include:
   "view": { "name": "auth_required", "title": "Authentication Required" },
   "content": {
     "error": "unauthorized",
-    "message": "This endpoint requires authentication. Log in with your Ed25519 keypair to get a Bearer token.",
+    "message": "This endpoint requires a Web Bot Auth-signed request (RFC 9421). Sign every request with your Ed25519 keypair.",
     "auth_protocol": {
-      "method": "Ed25519 Signature → Bearer Token",
+      "method": "RFC 9421 HTTP Message Signatures — Web Bot Auth profile",
+      "spec": "https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/",
       "flow": [
-        "1. POST /api/auth/login with {username, timestamp, signature}",
-        "2. Receive a Bearer token in the response",
-        "3. Include 'Authorization: Bearer <token>' on all subsequent requests"
+        "1. Publish your Ed25519 public key as a JWK Set at https://<your-fqdn>/.well-known/http-message-signatures-directory",
+        "2. On every request, attach Signature-Agent, Signature-Input, and Signature headers",
+        "3. The server identifies you by (signature-agent, keyid) — no separate login step"
       ],
-      "login_endpoint": "/api/auth/login",
-      "login_body": {
-        "username": "your-agent-username",
-        "timestamp": "ISO 8601 UTC (e.g., 2026-05-10T18:26:44Z) — must be within 5 minutes of server time",
-        "signature": "base64(Ed25519_sign(privateKey, utf8(username + \":\" + timestamp)))"
+      "required_headers": {
+        "Signature-Agent": "\"https://<your-fqdn>\"",
+        "Signature-Input": "sig1=(\"@method\" \"@authority\" \"@target-uri\" \"signature-agent\");created=<unix>;expires=<unix+≤300>;keyid=\"<JWK thumbprint>\";alg=\"ed25519\";nonce=\"<64-byte base64url>\";tag=\"web-bot-auth\"",
+        "Signature": "sig1=:<base64 Ed25519 signature of the RFC 9421 signature base>:"
       },
-      "signing_message_format": "username:timestamp (colon-separated, e.g., 'my-agent:2026-05-10T18:26:44Z')",
-      "signing_command": "printf '%s' \"${USERNAME}:${TIMESTAMP}\" > /tmp/sign_payload.txt && openssl pkeyutl -sign -inkey key.pem -in /tmp/sign_payload.txt | base64",
-      "critical_warning": "DO NOT pipe stdin to openssl pkeyutl — it produces empty signatures with Ed25519. ALWAYS write to a temp file first and use the -in flag.",
-      "skill_reference": "https://github.com/zoltankiss/agent-driven-development/blob/main/skills/ed25519-auth.md"
+      "constraints": {
+        "alg": "ed25519",
+        "tag": "web-bot-auth",
+        "expiry_window": "expires - created MUST be ≤ 300 seconds",
+        "keyid_format": "base64url JWK Thumbprint (RFC 7638, per RFC 8037 §A.3 for OKP)"
+      },
+      "skill_reference": "https://github.com/zoltankiss/agent-driven-development/blob/main/skills/ed25519-auth.md",
+      "example_implementation": "https://github.com/zoltankiss/agent-driven-development/blob/main/examples/agent-signup-flow.mjs"
     },
     "not_registered": {
-      "message": "If you haven't signed up yet, register your public key first.",
-      "signup_endpoint": "/api/auth/signup",
-      "signup_body": {
-        "username": "your-agent-username",
-        "entityType": "agent",
-        "publicKey": "PEM-format public key (-----BEGIN PUBLIC KEY-----...)",
-        "keyProof": "base64(Ed25519_sign(privateKey, utf8(username)))"
-      }
+      "message": "If you haven't signed up yet, POST a signed request to /api/auth/signup with {username, entityType}. The request signature is the proof-of-possession — no separate keyProof field.",
+      "signup_endpoint": "/api/auth/signup"
     }
   },
   "actions": [
-    { "id": "login", "label": "Log In", "method": "POST", "href": "/api/auth/login", "action_type": "submit_form",
-      "form_fields": [
-        { "name": "username", "type": "string", "required": true },
-        { "name": "timestamp", "type": "string", "required": true, "help_text": "ISO 8601 UTC, within 5 minutes of now" },
-        { "name": "signature", "type": "string", "required": true, "help_text": "base64(sign(username:timestamp))" }
-      ]
-    },
     { "id": "signup", "label": "Sign Up (New Agent)", "method": "POST", "href": "/api/auth/signup", "action_type": "submit_form",
       "form_fields": [
         { "name": "username", "type": "string", "required": true },
-        { "name": "entityType", "type": "string", "required": true, "default": "agent" },
-        { "name": "publicKey", "type": "string", "required": true },
-        { "name": "keyProof", "type": "string", "required": true, "help_text": "base64(sign(username))" }
-      ]
+        { "name": "entityType", "type": "string", "required": true, "default": "agent" }
+      ],
+      "help_text": "Request MUST include Signature-Agent / Signature-Input / Signature headers per RFC 9421 / Web Bot Auth."
     },
-    { "id": "discovery", "label": "View Full Auth Docs", "method": "GET", "href": "/.well-known/add.json", "action_type": "navigate" }
+    { "id": "discovery", "label": "View Discovery Manifest", "method": "GET", "href": "/.well-known/add.json", "action_type": "navigate" }
   ]
 }
 ```
 
 **ADD-native insight:** This is the single most important error response. An agent hitting 401 should be able to authenticate on the very next request without ANY external help. Include:
-- The exact signing message format (`username:timestamp`)
-- The critical warning about OpenSSL stdin piping (the #1 cause of auth failures)
-- A link to the full auth skill
+- The required headers (`Signature-Agent`, `Signature-Input`, `Signature`) with their structured-fields format
+- The hard constraints (`alg=ed25519`, `tag=web-bot-auth`, `expires - created ≤ 300s`)
+- Pointers to the working signing example and the skill
 - Both the login flow (for existing agents) and signup flow (for new agents)
 
 The `critical_warning` field is specifically for agents that use `openssl` — this single line prevents the most common Ed25519 signing failure across all platforms.

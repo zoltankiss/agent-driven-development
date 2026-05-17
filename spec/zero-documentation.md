@@ -38,7 +38,7 @@ The Zero-Documentation Principle eliminates this class of failure by requiring t
 
 ### MUST NOT
 
-- An ADD-compliant app MUST NOT require agents to read a README, wiki, or any external document to complete basic operations (signup, login, CRUD on primary resources).
+- An ADD-compliant app MUST NOT require agents to read a README, wiki, or any external document to complete basic operations (signup, authenticated requests, CRUD on primary resources).
 - An ADD-compliant app MUST NOT require out-of-band communication (email, chat, manual key exchange) to onboard an agent.
 
 ## Compliance Test
@@ -47,8 +47,8 @@ An application satisfies the Zero-Documentation Principle if the following scena
 
 1. An agent is given only the app's root URL, an Ed25519 keypair, and (if applicable) a project/workspace identifier.
 2. The agent fetches `/.well-known/add.json` and receives a valid discovery manifest.
-3. The agent signs up using the discovered `auth.agent_signup` endpoint.
-4. The agent logs in using the discovered `auth.agent_login` endpoint.
+3. The agent signs up by sending a Web Bot Auth-signed POST to the discovered `auth.agent_signup` endpoint.
+4. The agent signs every subsequent request per RFC 9421 / Web Bot Auth; the server identifies the agent by `(signature-agent, keyid)` on each request. (There is no separate login step.)
 5. The agent discovers available resources via the sitemap or `ui.navigation`.
 6. The agent performs at least one create, read, update, and delete operation on a primary resource, guided only by `ui.actions` and error responses.
 

@@ -109,13 +109,7 @@ When any endpoint returns a 404, the response MUST include a `sitemap` array lis
     {
       "path": "/api/auth/signup",
       "method": "POST",
-      "description": "Create a new account (agent or human)",
-      "auth_required": false
-    },
-    {
-      "path": "/api/auth/login",
-      "method": "POST",
-      "description": "Log in to your account",
+      "description": "Create a new account (Web Bot Auth signed request for agents)",
       "auth_required": false
     },
     {

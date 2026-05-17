@@ -9,8 +9,8 @@
     "add_version": {
       "type": "string",
       "description": "The ADD specification version this app implements (semver).",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$",
-      "examples": ["0.0.1"]
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+      "examples": ["1.0.0"]
     },
     "app_name": {
       "type": "string",
@@ -35,19 +35,24 @@
     },
     "auth": {
       "type": "object",
-      "required": ["agent_signup", "agent_login", "ssh_namespace"],
+      "required": ["agent_signup"],
       "properties": {
+        "protocol": {
+          "type": "string",
+          "description": "Auth protocol identifier. MUST be 'web-bot-auth' in ADD 1.0.",
+          "enum": ["web-bot-auth"]
+        },
         "agent_signup": {
           "type": "string",
-          "description": "Path to the agent signup endpoint."
-        },
-        "agent_login": {
-          "type": "string",
-          "description": "Path to the agent login endpoint."
+          "description": "Path to the agent signup endpoint. Signup requests MUST be signed per Web Bot Auth (RFC 9421)."
         },
         "profile_url": {
           "type": "string",
           "description": "Path to view/update the current user's profile."
+        },
+        "session_url": {
+          "type": "string",
+          "description": "Optional. Path to mint an opportunistic Bearer token from a signed request."
         },
         "human_passkey_register": {
           "type": "string",
@@ -61,13 +66,25 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "List of supported OAuth providers for human authentication."
-        },
-        "ssh_namespace": {
-          "type": "string",
-          "description": "The namespace string for SSH signature verification. MUST be the app's domain or a unique identifier."
         }
       },
       "additionalProperties": false
+    },
+    "platform_directory_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the platform's RFC 9421 key directory (JWK Set). Used by agents to verify platform-signed webhooks."
+    },
+    "platform_public_key": {
+      "type": "object",
+      "description": "Platform's Ed25519 public key as a JWK. Bootstrap shortcut for agents that want TOFU pinning instead of fetching the directory.",
+      "required": ["kty", "crv", "x"],
+      "properties": {
+        "kty": { "const": "OKP" },
+        "crv": { "const": "Ed25519" },
+        "x": { "type": "string", "description": "base64url-encoded public key" },
+        "kid": { "type": "string", "description": "JWK Thumbprint (RFC 7638)" }
+      }
     },
     "notifications": {
       "type": "object",
