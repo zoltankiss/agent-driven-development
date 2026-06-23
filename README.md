@@ -8,6 +8,14 @@ What if agents were first-class citizens when interacting with applications? Bec
 
 > New to ADD? Start with [AGENTS.md](./AGENTS.md) for a machine-optimized protocol summary, or read on for the philosophy and principles.
 
+## Beyond the protocol: methodology & field notes
+
+The protocol below is one half of ADD. The other half is how you *use* agents to build software faster and more honestly. These three documents are the most load-bearing ideas in this repo:
+
+- **[METHODOLOGY.md](./METHODOLOGY.md)** — Build the API, run autonomous agents against it for feedback in minutes, *then* build the UI. Covers model tiering, graceful-failure agent design, the file-based feedback channel, tick-based simulation, and the "architect the codebase around the weakest executor" insight.
+- **[ERROR_RESPONSE_SPEC.md](./ERROR_RESPONSE_SPEC.md)** — Self-correcting error responses, where every error leaves the agent *more* capable: per-status guidance, `did_you_mean` fuzzy route matching, structured retry/poll blocks, 504 write-safety, and a 5xx feedback template.
+- **[FIELD-NOTES.md](./FIELD-NOTES.md)** — Hard-won lessons from running this at scale, including the time agents reported success while silently looping on errors — and the deterministic, action-history-based scoring that fixed it.
+
 ## Core Principles
 
 ### 1. API as UI
